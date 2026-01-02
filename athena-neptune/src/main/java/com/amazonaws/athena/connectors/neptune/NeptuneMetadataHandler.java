@@ -287,6 +287,15 @@ public class NeptuneMetadataHandler extends GlueMetadataHandler
         Schema schema;
         Enums.GraphType graphType = Enums.GraphType.PROPERTYGRAPH;
 
+        // CHANGED_BY_SANKET: NEPTUNE_ATHENA_SCHEMA
+        // The existing Neptune-based schema inference samples only the first record,
+        // which may not contain all properties for a label.
+        // Until a robust schema inference strategy is implemented (e.g. multi-record sampling),
+        // we intentionally bypass Neptune schema discovery and ALWAYS return the Glue schema.
+        if (true) {
+            return getTableResponse;
+        }
+
         if (configOptions.get(Constants.CFG_GRAPH_TYPE) != null) {
             graphType = Enums.GraphType.valueOf(configOptions.get(Constants.CFG_GRAPH_TYPE).toUpperCase());
         }
