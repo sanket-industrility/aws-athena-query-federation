@@ -40,10 +40,15 @@ import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.tinkerpop.gremlin.structure.T;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
@@ -53,6 +58,10 @@ import java.util.stream.Collectors;
  */
 public final class VertexRowWriter 
 {
+    // CHANGED_BY_SANKET: ATHENA_NEPTUNE_DATATYPE_MISMATCH_FIX
+    // Added logging for invalid data type conversions
+    private static final Logger logger = LoggerFactory.getLogger(VertexRowWriter.class);
+
     private VertexRowWriter() 
     {
         // Empty private constructor
@@ -122,8 +131,28 @@ public final class VertexRowWriter
 
                             value.isSet = 0;
                             if (objValues != null && (objValues.get(0) != null) && !(objValues.get(0).toString().trim().isEmpty())) {
-                                value.value = ((Date) objValues.get(0)).getTime();
-                                value.isSet = 1;
+                                // CHANGED_BY_SANKET: ATHENA_NEPTUNE_DATATYPE_MISMATCH_FIX
+                                // Support parsing DATE from both Date objects and ISO 8601 strings
+                                // This handles cases where Neptune has date properties stored in different formats like Date or String
+                                // only set value if parsing is successful else log a warning and leave value as empty
+                                Object rawValue = objValues.get(0);
+                                if (rawValue instanceof Date) {
+                                    value.value = ((Date) rawValue).getTime();
+                                    value.isSet = 1;
+                                }
+                                else if (rawValue instanceof String && !((String) rawValue).trim().isEmpty()) {
+                                    try {
+                                        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+                                        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+                                        Date parsedDate = sdf.parse((String) rawValue);
+                                        value.value = parsedDate.getTime();
+                                        value.isSet = 1;
+                                    }
+                                    catch (ParseException e) {
+                                        logger.warn("Invalid DATE value for field {}: {}", fieldName, rawValue);
+                                        e.printStackTrace();
+                                    }
+                                }
                             }
                         });
                 break;
@@ -137,9 +166,21 @@ public final class VertexRowWriter
 
                             value.isSet = 0;
 
-                            if (objValues != null && objValues.get(0) != null && !(objValues.get(0).toString().trim().isEmpty())) {
-                                value.value = Integer.parseInt(objValues.get(0).toString());
-                                value.isSet = 1;
+                            // CHANGED_BY_SANKET: ATHENA_NEPTUNE_DATATYPE_MISMATCH_FIX
+                            // Support parsing INT from string values with trimming and error handling
+                            // This handles cases where Neptune has stored numeric properties as strings
+                            // only set value if parsing is successful else log a warning and leave value as empty
+                            if (objValues != null && objValues.get(0) != null) {
+                                String rawValue = objValues.get(0).toString().trim();
+                                try {
+                                    if (!rawValue.isEmpty()) {
+                                        value.value = Integer.parseInt(rawValue);
+                                        value.isSet = 1;
+                                    }
+                                } 
+                                catch (NumberFormatException ex) {
+                                    logger.warn("Invalid INT value for field {}: {}", fieldName, rawValue);
+                                }
                             }
                         });
                 break;
@@ -152,9 +193,22 @@ public final class VertexRowWriter
                             ArrayList<Object> objValues = (ArrayList) obj.get(fieldName);
 
                             value.isSet = 0;
-                            if (objValues != null && objValues.get(0) != null && !(objValues.get(0).toString().trim().isEmpty())) {
-                                value.value = Long.parseLong(objValues.get(0).toString());
-                                value.isSet = 1;
+
+                            // CHANGED_BY_SANKET: ATHENA_NEPTUNE_DATATYPE_MISMATCH_FIX
+                            // Support parsing BIGINT from string values with trimming and error handling
+                            // This handles cases where Neptune has stored numeric properties as strings
+                            // only set value if parsing is successful else log a warning and leave value as empty
+                            if (objValues != null && objValues.get(0) != null) {
+                                String rawValue = objValues.get(0).toString().trim();
+                                try {
+                                    if (!rawValue.isEmpty()) {
+                                        value.value = Long.parseLong(rawValue);
+                                        value.isSet = 1;
+                                    }
+                                } 
+                                catch (NumberFormatException ex) {
+                                    logger.warn("Invalid BIGINT value for field {}: {}", fieldName, rawValue);
+                                }
                             }
                         });
                 break;
@@ -166,9 +220,22 @@ public final class VertexRowWriter
                             ArrayList<Object> objValues = (ArrayList) obj.get(field.getName());
 
                             value.isSet = 0;
-                            if (objValues != null && objValues.get(0) != null && !(objValues.get(0).toString().trim().isEmpty())) {
-                                value.value = Float.parseFloat(objValues.get(0).toString());
-                                value.isSet = 1;
+                           
+                            // CHANGED_BY_SANKET: ATHENA_NEPTUNE_DATATYPE_MISMATCH_FIX
+                            // Support parsing FLOAT4 from string values with trimming and error handling
+                            // This handles cases where Neptune has stored numeric properties as strings
+                            // only set value if parsing is successful else log a warning and leave value as empty
+                            if (objValues != null && objValues.get(0) != null) {
+                                String rawValue = objValues.get(0).toString().trim();
+                                try {
+                                    if (!rawValue.isEmpty()) {
+                                        value.value = Float.parseFloat(rawValue);
+                                        value.isSet = 1;
+                                    }
+                                } 
+                                catch (NumberFormatException ex) {
+                                    logger.warn("Invalid FLOAT4 value for field {}: {}", field.getName(), rawValue);
+                                }
                             }
                         });
                 break;
@@ -180,9 +247,22 @@ public final class VertexRowWriter
                             ArrayList<Object> objValues = (ArrayList) obj.get(field.getName());
 
                             value.isSet = 0;
-                            if (objValues != null && objValues.get(0) != null && !(objValues.get(0).toString().trim().isEmpty())) {
-                                value.value = Double.parseDouble(objValues.get(0).toString());
-                                value.isSet = 1;
+
+                            // CHANGED_BY_SANKET: ATHENA_NEPTUNE_DATATYPE_MISMATCH_FIX
+                            // Support parsing FLOAT8 from string values with trimming and error handling
+                            // This handles cases where Neptune has stored numeric properties as strings
+                            // only set value if parsing is successful else log a warning and leave value as empty
+                            if (objValues != null && objValues.get(0) != null) {
+                                String rawValue = objValues.get(0).toString().trim();
+                                try {
+                                    if (!rawValue.isEmpty()) {
+                                        value.value = Double.parseDouble(rawValue);
+                                        value.isSet = 1;
+                                    }
+                                } 
+                                catch (NumberFormatException ex) {
+                                    logger.warn("Invalid FLOAT8 value for field {}: {}", field.getName(), rawValue);
+                                }
                             }
                         });
 

@@ -114,12 +114,17 @@ public class PropertyGraphHandler
         GraphTraversal graphTraversal = null;
         String labelName;
         String gremlinQuery = null;
+        // CHANGED_BY_SANKET: ATHENA_NEPTUNE_CONNECTOR_PAGINATION
+        // Set default pageSize for paginated fetching to avoid memory/time limits
+        int pageSize = 10000;
         if (recordsRequest.getConstraints().isQueryPassThrough()) {
             Map<String, String> qptArguments = recordsRequest.getConstraints().getQueryPassthroughArguments();
             queryPassthrough.verify(qptArguments);
             labelName = qptArguments.get(NeptuneQueryPassthrough.COLLECTION);
             gremlinQuery = qptArguments.get(NeptuneQueryPassthrough.QUERY);
-
+            // CHANGED_BY_SANKET: ATHENA_NEPTUNE_CONNECTOR_PAGINATION
+            // Remove trailing `.valueMap()` from user query because row fetching now handles valueMap pagination internally
+            gremlinQuery = gremlinQuery.replaceAll("\\.valueMap\\s*\\(\\s*(true)?\\s*\\)\\s*$", "");
             Object object = getResponseFromGremlinQuery(graphTraversalSource, gremlinQuery);
             graphTraversal = (GraphTraversal) object;
         }
@@ -143,28 +148,30 @@ public class PropertyGraphHandler
                 case VERTEX:
                     if (!recordsRequest.getConstraints().isQueryPassThrough()) {
                         graphTraversal = graphTraversalSource.V().hasLabel(labelName);
-                        graphTraversal = graphTraversal.valueMap().with(WithOptions.tokens);
                     }
 
                     for (final Field nextField : recordsRequest.getSchema().getFields()) {
                         VertexRowWriter.writeRowTemplate(builder, nextField, configOptions);
                     }
 
-                    parseNodeOrEdge(queryStatusChecker, spiller, numRows, graphTraversal, builder);
+                    // CHANGED_BY_SANKET: ATHENA_NEPTUNE_CONNECTOR_PAGINATION
+                    // Pass pageSize and fetchType for paginated vertex fetching
+                    parseNodeOrEdge(queryStatusChecker, spiller, numRows, graphTraversal, builder, pageSize, "valueMap");
 
                     break;
 
                 case EDGE:
                     if (!recordsRequest.getConstraints().isQueryPassThrough()) {
                         graphTraversal = graphTraversalSource.E().hasLabel(labelName);
-                        graphTraversal = graphTraversal.elementMap();
                     }
 
                     for (final Field nextField : recordsRequest.getSchema().getFields()) {
                         EdgeRowWriter.writeRowTemplate(builder, nextField, configOptions);
                     }
 
-                    parseNodeOrEdge(queryStatusChecker, spiller, numRows, graphTraversal, builder);
+                    // CHANGED_BY_SANKET: ATHENA_NEPTUNE_CONNECTOR_PAGINATION
+                    // Pass pageSize and fetchType for paginated edge fetching
+                    parseNodeOrEdge(queryStatusChecker, spiller, numRows, graphTraversal, builder, pageSize, "elementMap");
 
                     break;
                     
@@ -205,21 +212,56 @@ public class PropertyGraphHandler
         return engine.eval(gremlinQuery, bindings);
     }
 
-    private void parseNodeOrEdge(final QueryStatusChecker queryStatusChecker, final BlockSpiller spiller, long numRows,
-            GraphTraversal graphTraversal, GeneratedRowWriter.RowWriterBuilder builder) 
+    // CHANGED_BY_SANKET: ATHENA_NEPTUNE_CONNECTOR_PAGINATION
+    // Added support for paginated fetching of vertices/edges from Neptune
+    // to avoid memory/time limit exceeded errors.
+    // New params - pageSize and fetchType for paginated vertex/edge fetching
+    private void parseNodeOrEdge(
+        final QueryStatusChecker queryStatusChecker,
+        final BlockSpiller spiller,
+        long numRows,
+        final GraphTraversal originalTraversal,
+        final GeneratedRowWriter.RowWriterBuilder builder,
+        final int pageSize,
+        final String fetchType
+    ) 
     {
-        final GraphTraversal graphTraversalFinal1 = graphTraversal;
         final GeneratedRowWriter rowWriter = builder.build();
 
-        while (graphTraversalFinal1.hasNext() && queryStatusChecker.isQueryRunning()) {
-            numRows++;
+        int offset = 0;
+        boolean hasMore = true;
 
-            spiller.writeRows((final Block block, final int rowNum) -> {
-                final Map obj = (Map) graphTraversalFinal1.next();
-                return (rowWriter.writeRow(block, rowNum, (Object) obj) ? 1 : 0);
-            });
+        while (hasMore && queryStatusChecker.isQueryRunning()) {
+            GraphTraversal<?, ?> paginated = originalTraversal.asAdmin().clone().range(offset, offset + pageSize);
+            if (fetchType.equals("elementMap")) {
+                paginated = paginated.elementMap();
+            } 
+            else {
+                paginated = paginated.valueMap().with(WithOptions.tokens);
+            }
+
+            int rowsThisPage = 0;
+            while (paginated.hasNext() && queryStatusChecker.isQueryRunning()) {
+                final Map<?, ?> resultMap = (Map<?, ?>) paginated.next();
+                rowsThisPage++;
+                numRows++;
+
+                spiller.writeRows((Block block, int rowNum) ->
+                    rowWriter.writeRow(block, rowNum, resultMap) ? 1 : 0
+                );
+            }
+
+            // Log each page fetched to monitor pagination progress
+            logger.info("Fetched {} rows in page, total rows: {}", rowsThisPage, numRows);
+
+            if (rowsThisPage < pageSize) {
+                hasMore = false; // last page
+            } 
+            else {
+                offset += pageSize;
+            }
         }
 
-        logger.info("readWithConstraint: numRows[{}]", numRows);
+        logger.info("Total rows written: {}", numRows);
     }
 }

@@ -41,6 +41,8 @@ import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.T;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -53,6 +55,10 @@ import java.util.TreeMap;
  */
 public final class EdgeRowWriter 
 {
+    // CHANGED_BY_SANKET: ATHENA_NEPTUNE_DATATYPE_MISMATCH_FIX
+    // Added logging for invalid data type conversions
+    private static final Logger logger = LoggerFactory.getLogger(EdgeRowWriter.class);
+
     private EdgeRowWriter() 
     {
         // Empty private constructor
@@ -116,9 +122,21 @@ public final class EdgeRowWriter
                             Object fieldValue = obj.get(field.getName());
                             value.isSet = 0;
 
-                            if (fieldValue != null && !(fieldValue.toString().trim().isEmpty())) {
-                                value.value = Integer.parseInt(fieldValue.toString());
-                                value.isSet = 1;
+                            // CHANGED_BY_SANKET: ATHENA_NEPTUNE_DATATYPE_MISMATCH_FIX
+                            // Support parsing INT from string values with trimming and error handling
+                            // This handles cases where Neptune has stored numeric properties as strings
+                            // only set value if parsing is successful else log a warning and leave value as empty
+                            if (fieldValue != null) {
+                                String rawValue = fieldValue.toString().trim();
+                                try {
+                                    if (!rawValue.isEmpty()) {
+                                        value.value = Integer.parseInt(rawValue);
+                                        value.isSet = 1;
+                                    }
+                                } 
+                                catch (NumberFormatException e) {
+                                    logger.warn("Invalid INT value for field {}: '{}'", field.getName(), rawValue);
+                                }
                             }
                         });
                 break;
@@ -130,9 +148,21 @@ public final class EdgeRowWriter
                             Object fieldValue = obj.get(field.getName());
                             value.isSet = 0;
 
-                            if (fieldValue != null && !(fieldValue.toString().trim().isEmpty())) {
-                                value.value = Long.parseLong(fieldValue.toString());
-                                value.isSet = 1;
+                            // CHANGED_BY_SANKET: ATHENA_NEPTUNE_DATATYPE_MISMATCH_FIX
+                            // Support parsing BIGINT from string values with trimming and error handling
+                            // This handles cases where Neptune has stored numeric properties as strings
+                            // only set value if parsing is successful else log a warning and leave value as empty
+                            if (fieldValue != null) {
+                                String rawValue = fieldValue.toString().trim();
+                                try {
+                                    if (!rawValue.isEmpty()) {
+                                        value.value = Long.parseLong(rawValue);
+                                        value.isSet = 1;
+                                    }
+                                } 
+                                catch (NumberFormatException e) {
+                                    logger.warn("Invalid BIGINT value for field {}: '{}'", field.getName(), rawValue);
+                                }
                             }
                         });
                 break;
@@ -144,9 +174,21 @@ public final class EdgeRowWriter
                             Object fieldValue = obj.get(field.getName());
                             value.isSet = 0;
 
-                            if (fieldValue != null && !(fieldValue.toString().trim().isEmpty())) {
-                                value.value = Float.parseFloat(fieldValue.toString());
-                                value.isSet = 1;
+                            // CHANGED_BY_SANKET: ATHENA_NEPTUNE_DATATYPE_MISMATCH_FIX
+                            // Support parsing FLOAT4 from string values with trimming and error handling
+                            // This handles cases where Neptune has stored numeric properties as strings
+                            // only set value if parsing is successful else log a warning and leave value as empty
+                            if (fieldValue != null) {
+                                String rawValue = fieldValue.toString().trim();
+                                try {
+                                    if (!rawValue.isEmpty()) {
+                                        value.value = Float.parseFloat(rawValue);
+                                        value.isSet = 1;
+                                    }
+                                } 
+                                catch (NumberFormatException e) {
+                                    logger.warn("Invalid FLOAT4 value for field {}: '{}'", field.getName(), rawValue);
+                                }
                             }
                         });
                 break;
@@ -158,9 +200,21 @@ public final class EdgeRowWriter
                             Object fieldValue = obj.get(field.getName());
                             value.isSet = 0;
 
-                            if (fieldValue != null && !fieldValue.toString().trim().isEmpty()) {
-                                value.value = Double.parseDouble(fieldValue.toString());
-                                value.isSet = 1;
+                            // CHANGED_BY_SANKET: ATHENA_NEPTUNE_DATATYPE_MISMATCH_FIX
+                            // Support parsing FLOAT8 from string values with trimming and error handling
+                            // This handles cases where Neptune has stored numeric properties as strings
+                            // only set value if parsing is successful else log a warning and leave value as empty
+                            if (fieldValue != null) {
+                                String rawValue = fieldValue.toString().trim();
+                                try {
+                                    if (!rawValue.isEmpty()) {
+                                        value.value = Double.parseDouble(rawValue);
+                                        value.isSet = 1;
+                                    }
+                                } 
+                                catch (NumberFormatException e) {
+                                    logger.warn("Invalid FLOAT8 value for field {}: '{}'", field.getName(), rawValue);
+                                }
                             }
                         });
 
